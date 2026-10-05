@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include "RenegadeVR/D3D8Hooks.h"
 #include "RenegadeVR/D3D8Proxy.h"
@@ -33,6 +35,7 @@ namespace
     constexpr float kPerspectiveEpsilon = 0.01f;
     constexpr float kMainCameraNearMin = 0.05f;
     constexpr float kMainCameraNearMax = 1.00f;
+    constexpr float kPi = 3.14159265358979323846f;
 
     struct LegacyD3DMatrix
     {
@@ -92,6 +95,137 @@ namespace
     bool g_hasLoggedCameraView = false;
     LONG g_lastCameraLogFrame = -kCameraLogFrameInterval;
     bool g_mainProjectionAnnounced = false;
+
+    bool g_debugCameraYawEnabled = false;
+    float g_debugCameraYawDegrees = 0.0f;
+    volatile LONG g_debugCameraYawApplyCount = 0;
+
+    bool GetProxyIniPath(char* output, DWORD outputSize)
+    {
+        if (!output || outputSize == 0)
+        {
+            return false;
+        }
+
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExA(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCSTR>(&GetProxyIniPath),
+                &module))
+        {
+            return false;
+        }
+
+        char modulePath[MAX_PATH] = {};
+        const DWORD length = GetModuleFileNameA(module, modulePath, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+        {
+            return false;
+        }
+
+        char* slash = std::strrchr(modulePath, '\\');
+        if (!slash)
+        {
+            slash = std::strrchr(modulePath, '/');
+        }
+
+        if (!slash)
+        {
+            return false;
+        }
+
+        *(slash + 1) = '\0';
+        sprintf_s(output, outputSize, "%sRenegadeVR.ini", modulePath);
+        return true;
+    }
+
+    void LoadDebugCameraSettings()
+    {
+        char iniPath[MAX_PATH] = {};
+        if (!GetProxyIniPath(iniPath, MAX_PATH))
+        {
+            RenegadeVR::D3D8ProxyLog(
+                "Debug camera settings unavailable: RenegadeVR.ini path could not be resolved."
+            );
+            return;
+        }
+
+        g_debugCameraYawEnabled =
+            GetPrivateProfileIntA(
+                "Debug",
+                "EnableCameraYawTest",
+                0,
+                iniPath
+            ) != 0;
+
+        char yawText[64] = {};
+        GetPrivateProfileStringA(
+            "Debug",
+            "CameraYawDegrees",
+            "5.0",
+            yawText,
+            static_cast<DWORD>(sizeof(yawText)),
+            iniPath
+        );
+
+        g_debugCameraYawDegrees = static_cast<float>(std::atof(yawText));
+
+        char message[256] = {};
+        sprintf_s(
+            message,
+            "Debug camera yaw test: %s, Degrees=%.3f.",
+            g_debugCameraYawEnabled ? "enabled" : "disabled",
+            g_debugCameraYawDegrees
+        );
+        RenegadeVR::D3D8ProxyLog(message);
+    }
+
+    LegacyD3DMatrix MultiplyMatrices(
+        const LegacyD3DMatrix& a,
+        const LegacyD3DMatrix& b)
+    {
+        LegacyD3DMatrix result = {};
+
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+            {
+                float value = 0.0f;
+
+                for (int k = 0; k < 4; ++k)
+                {
+                    value += a.m[row][k] * b.m[k][column];
+                }
+
+                result.m[row][column] = value;
+            }
+        }
+
+        return result;
+    }
+
+    LegacyD3DMatrix ApplyCameraSpaceYaw(
+        const LegacyD3DMatrix& view,
+        float yawDegrees)
+    {
+        const float radians = yawDegrees * (kPi / 180.0f);
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+
+        // D3D fixed-function matrices use row-vector convention. Post-
+        // multiplying the view transform applies a rotation in camera space,
+        // which is exactly what an HMD orientation offset will eventually do.
+        LegacyD3DMatrix yaw = {};
+        yaw.m[0][0] = c;
+        yaw.m[0][2] = -s;
+        yaw.m[1][1] = 1.0f;
+        yaw.m[2][0] = s;
+        yaw.m[2][2] = c;
+        yaw.m[3][3] = 1.0f;
+
+        return MultiplyMatrices(view, yaw);
+    }
 
     float EstimateNearPlane(const LegacyD3DMatrix& projection)
     {
@@ -483,6 +617,38 @@ namespace
             return E_FAIL;
         }
 
+        if (
+            state == kD3DTS_View &&
+            matrix &&
+            g_debugCameraYawEnabled &&
+            g_hasProjection &&
+            IsMainPerspectiveProjection(g_lastProjection) &&
+            !IsApproximatelyIdentity(matrix) &&
+            std::fabs(g_debugCameraYawDegrees) > 0.0001f)
+        {
+            LegacyD3DMatrix modifiedView =
+                ApplyCameraSpaceYaw(*matrix, g_debugCameraYawDegrees);
+
+            const LONG applyCount =
+                InterlockedIncrement(&g_debugCameraYawApplyCount);
+
+            if (applyCount == 1)
+            {
+                char message[256] = {};
+                sprintf_s(
+                    message,
+                    "DEBUG_CAMERA_YAW applied for first time. Degrees=%.3f PresentFrame=%ld.",
+                    g_debugCameraYawDegrees,
+                    g_presentCount
+                );
+                RenegadeVR::D3D8ProxyLog(message);
+                LogMatrix("DEBUG_CAMERA_YAW_ORIGINAL_VIEW", applyCount, matrix);
+                LogMatrix("DEBUG_CAMERA_YAW_MODIFIED_VIEW", applyCount, &modifiedView);
+            }
+
+            return g_originalSetTransform(self, state, &modifiedView);
+        }
+
         return g_originalSetTransform(self, state, matrix);
     }
 
@@ -537,6 +703,8 @@ namespace
             g_originalSetTransform,
             "IDirect3DDevice8::SetTransform"
         );
+
+        LoadDebugCameraSettings();
 
         RenegadeVR::D3D8ProxyLog(
             success
