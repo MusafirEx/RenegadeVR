@@ -78,7 +78,7 @@ With `VCPKG_ROOT` set to your vcpkg folder:
 
 ```bat
 cmake -S xrhost -B build-xrhost -A x64 ^
-  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
+  "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
 
 cmake --build build-xrhost --config Release
 ```
