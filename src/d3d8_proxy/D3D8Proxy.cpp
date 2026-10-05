@@ -5,6 +5,7 @@
 
 #include "RenegadeVR/D3D8Hooks.h"
 #include "RenegadeVR/D3D8Proxy.h"
+#include "RenegadeVR/PluginAPI.h"
 
 // The bootstrap proxy intentionally does not include <d3d8.h>.
 // Modern Windows SDKs no longer ship the legacy Direct3D 8 headers, and for
@@ -20,6 +21,12 @@ namespace
     HMODULE g_realD3D8 = nullptr;
     HMODULE g_vrPlugin = nullptr;
     volatile LONG g_bootstrapLogInitialized = 0;
+
+    RenegadeVR::PluginInitializeFn g_pluginInitialize = nullptr;
+    RenegadeVR::PluginShutdownFn g_pluginShutdown = nullptr;
+    RenegadeVR::PluginUpdateFn g_pluginUpdate = nullptr;
+    RenegadeVR::PluginGetHeadPoseFn g_pluginGetHeadPose = nullptr;
+    bool g_pluginInitialized = false;
 
     using Direct3DCreate8Fn = IDirect3D8Opaque* (WINAPI*)(UINT);
     Direct3DCreate8Fn g_realDirect3DCreate8 = nullptr;
@@ -194,32 +201,84 @@ namespace RenegadeVR
 
     bool LoadVRPlugin()
     {
-        if (g_vrPlugin)
+        if (g_pluginInitialized)
         {
             return true;
         }
 
-        char directory[MAX_PATH] = {};
-        if (!GetProxyDirectory(directory, MAX_PATH))
-        {
-            D3D8ProxyLog("Unable to resolve RenegadeVR proxy directory.");
-            return false;
-        }
-
-        char pluginPath[MAX_PATH] = {};
-        sprintf_s(pluginPath, "%s\\RenegadeVR.dll", directory);
-
-        D3D8ProxyLog("Loading RenegadeVR.dll.");
-
-        g_vrPlugin = LoadLibraryA(pluginPath);
         if (!g_vrPlugin)
         {
-            LogLastError("LoadLibraryA(RenegadeVR.dll)");
+            char directory[MAX_PATH] = {};
+            if (!GetProxyDirectory(directory, MAX_PATH))
+            {
+                D3D8ProxyLog("Unable to resolve RenegadeVR proxy directory.");
+                return false;
+            }
+
+            char pluginPath[MAX_PATH] = {};
+            sprintf_s(pluginPath, "%s\\RenegadeVR.dll", directory);
+
+            D3D8ProxyLog("Loading RenegadeVR.dll.");
+
+            g_vrPlugin = LoadLibraryA(pluginPath);
+            if (!g_vrPlugin)
+            {
+                LogLastError("LoadLibraryA(RenegadeVR.dll)");
+                return false;
+            }
+
+            D3D8ProxyLog("RenegadeVR.dll loaded.");
+        }
+
+        g_pluginInitialize = reinterpret_cast<PluginInitializeFn>(
+            GetProcAddress(g_vrPlugin, "RenegadeVR_Initialize")
+        );
+        g_pluginShutdown = reinterpret_cast<PluginShutdownFn>(
+            GetProcAddress(g_vrPlugin, "RenegadeVR_Shutdown")
+        );
+        g_pluginUpdate = reinterpret_cast<PluginUpdateFn>(
+            GetProcAddress(g_vrPlugin, "RenegadeVR_Update")
+        );
+        g_pluginGetHeadPose = reinterpret_cast<PluginGetHeadPoseFn>(
+            GetProcAddress(g_vrPlugin, "RenegadeVR_GetHeadPose")
+        );
+
+        if (!g_pluginInitialize || !g_pluginUpdate || !g_pluginGetHeadPose)
+        {
+            D3D8ProxyLog(
+                "RenegadeVR.dll is missing one or more required plugin API exports."
+            );
             return false;
         }
 
-        D3D8ProxyLog("RenegadeVR.dll loaded.");
+        if (!g_pluginInitialize())
+        {
+            D3D8ProxyLog("RenegadeVR_Initialize returned FALSE.");
+            return false;
+        }
+
+        g_pluginInitialized = true;
+        D3D8ProxyLog("RenegadeVR plugin API initialized successfully.");
         return true;
+    }
+
+    bool TryGetVRHeadPose(HeadPose& pose)
+    {
+        pose = {};
+
+        if (!g_pluginInitialized || !g_pluginUpdate || !g_pluginGetHeadPose)
+        {
+            return false;
+        }
+
+        g_pluginUpdate();
+
+        if (!g_pluginGetHeadPose(&pose))
+        {
+            return false;
+        }
+
+        return pose.orientationValid != FALSE;
     }
 }
 
