@@ -89,9 +89,10 @@ namespace
     {
         NormalizeQuaternion(x, y, z, w);
 
-        // OpenXR is right-handed with +Y up. These equations extract an
-        // orientation compatible with RenegadeVR's camera-space Yaw(Y),
-        // Pitch(X), Roll(Z) debug transform.
+        // OpenXR is right-handed with +Y up. These equations extract the
+        // headset orientation. RenegadeVR's current camera-space view transform
+        // uses the opposite sign for yaw and pitch, so those two axes are
+        // inverted below. Roll currently matches the expected direction.
         const float sinPitch =
             std::clamp(2.0f * (w * x - z * y), -1.0f, 1.0f);
 
@@ -106,8 +107,15 @@ namespace
         );
 
         constexpr float toDegrees = 180.0f / kPi;
-        yawDegrees = yaw * toDegrees;
-        pitchDegrees = pitch * toDegrees;
+        // Axis mapping verified on Quest 3S:
+        //   HMD right  -> camera right
+        //   HMD left   -> camera left
+        //   HMD up     -> camera up
+        //   HMD down   -> camera down
+        // The current D3D8 camera-space transform requires yaw/pitch sign
+        // inversion to achieve those physical directions.
+        yawDegrees = -yaw * toDegrees;
+        pitchDegrees = -pitch * toDegrees;
         rollDegrees = roll * toDegrees;
     }
 }
