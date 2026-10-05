@@ -72,13 +72,19 @@ build/bin/Release/
 ## Build the OpenXR host (x64)
 
 The host is a separate x64 CMake project and uses the vcpkg
-`openxr-loader` package.
+`openxr-loader` package. RenegadeVR deliberately uses classic vcpkg mode
+here so the build does not require a manifest baseline.
 
 With `VCPKG_ROOT` set to your vcpkg folder:
 
 ```bat
+"%VCPKG_ROOT%\vcpkg.exe" install openxr-loader:x64-windows
+
+rmdir /s /q build-xrhost
+
 cmake -S xrhost -B build-xrhost -A x64 ^
-  "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+  "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
+  "-DVCPKG_TARGET_TRIPLET=x64-windows"
 
 cmake --build build-xrhost --config Release
 ```
