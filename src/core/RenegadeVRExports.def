@@ -1,0 +1,6 @@
+LIBRARY RenegadeVR
+EXPORTS
+    RenegadeVR_Initialize
+    RenegadeVR_Shutdown
+    RenegadeVR_Update
+    RenegadeVR_GetHeadPose
