@@ -1,10 +1,17 @@
 #include <windows.h>
-#include <d3d8.h>
 
 #include <cstdio>
 #include <cstring>
 
 #include "RenegadeVR/D3D8Proxy.h"
+
+// The bootstrap proxy intentionally does not include <d3d8.h>.
+// Modern Windows SDKs no longer ship the legacy Direct3D 8 headers, and for
+// this first milestone we only need to forward the Direct3DCreate8 ABI.
+//
+// Direct3DCreate8 returns an IDirect3D8* COM interface pointer. Treating that
+// pointer as void* is ABI-compatible for transparent forwarding on x86.
+using IDirect3D8Opaque = void;
 
 namespace
 {
@@ -12,7 +19,7 @@ namespace
     HMODULE g_realD3D8 = nullptr;
     HMODULE g_vrPlugin = nullptr;
 
-    using Direct3DCreate8Fn = IDirect3D8* (WINAPI*)(UINT);
+    using Direct3DCreate8Fn = IDirect3D8Opaque* (WINAPI*)(UINT);
     Direct3DCreate8Fn g_realDirect3DCreate8 = nullptr;
 
     bool GetProxyDirectory(char* output, DWORD outputSize)
@@ -195,7 +202,7 @@ namespace RenegadeVR
 }
 
 extern "C" __declspec(dllexport)
-IDirect3D8* WINAPI Direct3DCreate8(UINT sdkVersion)
+IDirect3D8Opaque* WINAPI Direct3DCreate8(UINT sdkVersion)
 {
     BootstrapLog("Direct3DCreate8 intercepted.");
 
@@ -209,7 +216,7 @@ IDirect3D8* WINAPI Direct3DCreate8(UINT sdkVersion)
         return nullptr;
     }
 
-    IDirect3D8* d3d8 = g_realDirect3DCreate8(sdkVersion);
+    IDirect3D8Opaque* d3d8 = g_realDirect3DCreate8(sdkVersion);
 
     if (d3d8)
     {
