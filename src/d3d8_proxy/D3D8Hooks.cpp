@@ -105,6 +105,20 @@ namespace
 
     HWND g_gameWindow = nullptr;
     bool g_autoRestoreMouseFocus = true;
+
+    // VR culling workaround: steer Renegade's real gameplay camera from HMD
+    // yaw/pitch through relative mouse input. This makes the engine camera
+    // transform (and therefore its frustum/PVS collection) follow the headset
+    // before PhysicsSceneClass::Pre_Render_Processing runs.
+    bool g_engineCameraSteeringEnabled = true;
+    float g_engineMouseScale = 0.0025f;
+    float g_engineSteeringYawSign = 1.0f;
+    float g_engineSteeringPitchSign = -1.0f;
+    bool g_engineSteeringPoseValid = false;
+    float g_lastEngineSteeringYawDegrees = 0.0f;
+    float g_lastEngineSteeringPitchDegrees = 0.0f;
+    volatile LONG g_engineSteeringInjectCount = 0;
+
     bool g_mouseFocusRepairComplete = false;
     LONG g_mouseFocusRepairAttempts = 0;
     LONG g_lastMouseFocusRepairFrame = -1;
@@ -261,6 +275,140 @@ namespace
         return g_cachedHeadPoseValid;
     }
 
+    float WrapAngleDeltaDegrees(float delta)
+    {
+        while (delta > 180.0f)
+        {
+            delta -= 360.0f;
+        }
+
+        while (delta < -180.0f)
+        {
+            delta += 360.0f;
+        }
+
+        return delta;
+    }
+
+    void ResetEngineCameraSteeringPose()
+    {
+        g_engineSteeringPoseValid = false;
+        g_lastEngineSteeringYawDegrees = 0.0f;
+        g_lastEngineSteeringPitchDegrees = 0.0f;
+    }
+
+    void UpdateEngineCameraSteering()
+    {
+        if (!g_engineCameraSteeringEnabled || !g_gameWindow)
+        {
+            ResetEngineCameraSteeringPose();
+            return;
+        }
+
+        // Do not queue relative mouse movement while Renegade is paused,
+        // minimized, or another application owns the foreground.
+        if (
+            GetForegroundWindow() != g_gameWindow ||
+            !IsWindowOrChildFocused(g_gameWindow, GetFocus()))
+        {
+            ResetEngineCameraSteeringPose();
+            return;
+        }
+
+        RenegadeVR::HeadPose pose = {};
+        if (!GetLiveHeadPoseForCurrentFrame(pose))
+        {
+            ResetEngineCameraSteeringPose();
+            return;
+        }
+
+        if (!g_engineSteeringPoseValid)
+        {
+            g_lastEngineSteeringYawDegrees = pose.yawDegrees;
+            g_lastEngineSteeringPitchDegrees = pose.pitchDegrees;
+            g_engineSteeringPoseValid = true;
+
+            RenegadeVR::D3D8ProxyLog(
+                "VR engine-camera steering armed; HMD yaw/pitch will drive Renegade camera input."
+            );
+            return;
+        }
+
+        const float deltaYawDegrees =
+            WrapAngleDeltaDegrees(
+                pose.yawDegrees - g_lastEngineSteeringYawDegrees
+            );
+        const float deltaPitchDegrees =
+            pose.pitchDegrees - g_lastEngineSteeringPitchDegrees;
+
+        g_lastEngineSteeringYawDegrees = pose.yawDegrees;
+        g_lastEngineSteeringPitchDegrees = pose.pitchDegrees;
+
+        if (g_engineMouseScale <= 0.000001f)
+        {
+            return;
+        }
+
+        constexpr float degreesToRadians = kPi / 180.0f;
+
+        const LONG dx = static_cast<LONG>(std::lround(
+            g_engineSteeringYawSign *
+            deltaYawDegrees *
+            degreesToRadians /
+            g_engineMouseScale
+        ));
+
+        const LONG dy = static_cast<LONG>(std::lround(
+            g_engineSteeringPitchSign *
+            deltaPitchDegrees *
+            degreesToRadians /
+            g_engineMouseScale
+        ));
+
+        if (dx == 0 && dy == 0)
+        {
+            return;
+        }
+
+        INPUT input = {};
+        input.type = INPUT_MOUSE;
+        input.mi.dx = dx;
+        input.mi.dy = dy;
+        input.mi.dwFlags = MOUSEEVENTF_MOVE;
+
+        if (SendInput(1, &input, sizeof(input)) == 1)
+        {
+            const LONG injectCount =
+                InterlockedIncrement(&g_engineSteeringInjectCount);
+
+            if (injectCount == 1)
+            {
+                char message[320] = {};
+                sprintf_s(
+                    message,
+                    "VR engine-camera steering injected first mouse delta. dYaw=%.3f dPitch=%.3f dx=%ld dy=%ld MouseScale=%.6f.",
+                    deltaYawDegrees,
+                    deltaPitchDegrees,
+                    dx,
+                    dy,
+                    g_engineMouseScale
+                );
+                RenegadeVR::D3D8ProxyLog(message);
+            }
+        }
+        else
+        {
+            const DWORD error = GetLastError();
+            char message[256] = {};
+            sprintf_s(
+                message,
+                "VR engine-camera steering SendInput failed. GetLastError=%lu.",
+                static_cast<unsigned long>(error)
+            );
+            RenegadeVR::D3D8ProxyLog(message);
+        }
+    }
+
     bool GetProxyIniPath(char* output, DWORD outputSize)
     {
         if (!output || outputSize == 0)
@@ -382,6 +530,52 @@ namespace
                 iniPath
             ) != 0;
 
+        g_engineCameraSteeringEnabled =
+            GetPrivateProfileIntA(
+                "VR",
+                "EngineCameraSteering",
+                1,
+                iniPath
+            ) != 0;
+
+        char engineMouseScaleText[64] = {};
+        char engineYawSignText[64] = {};
+        char enginePitchSignText[64] = {};
+
+        GetPrivateProfileStringA(
+            "Input",
+            "EngineMouseScale",
+            "0.0025",
+            engineMouseScaleText,
+            static_cast<DWORD>(sizeof(engineMouseScaleText)),
+            iniPath
+        );
+
+        GetPrivateProfileStringA(
+            "Input",
+            "EngineSteeringYawSign",
+            "1.0",
+            engineYawSignText,
+            static_cast<DWORD>(sizeof(engineYawSignText)),
+            iniPath
+        );
+
+        GetPrivateProfileStringA(
+            "Input",
+            "EngineSteeringPitchSign",
+            "-1.0",
+            enginePitchSignText,
+            static_cast<DWORD>(sizeof(enginePitchSignText)),
+            iniPath
+        );
+
+        g_engineMouseScale =
+            static_cast<float>(std::atof(engineMouseScaleText));
+        g_engineSteeringYawSign =
+            static_cast<float>(std::atof(engineYawSignText));
+        g_engineSteeringPitchSign =
+            static_cast<float>(std::atof(enginePitchSignText));
+
         char message[320] = {};
         sprintf_s(
             message,
@@ -399,6 +593,18 @@ namespace
             g_autoRestoreMouseFocus ? "enabled" : "disabled"
         );
         RenegadeVR::D3D8ProxyLog(message);
+
+        sprintf_s(
+            message,
+            "VR engine-camera steering: %s, MouseScale=%.6f YawSign=%.1f PitchSign=%.1f.",
+            g_engineCameraSteeringEnabled ? "enabled" : "disabled",
+            g_engineMouseScale,
+            g_engineSteeringYawSign,
+            g_engineSteeringPitchSign
+        );
+        RenegadeVR::D3D8ProxyLog(message);
+
+        ResetEngineCameraSteeringPose();
     }
 
     LegacyD3DMatrix MultiplyMatrices(
@@ -715,6 +921,13 @@ namespace
             RenegadeVR::D3D8ProxyLog(message);
         }
 
+        // Present is late enough that the current frame is already submitted,
+        // but early enough to queue relative mouse movement for Renegade's
+        // DirectInput read on the next gameplay frame. This causes the engine's
+        // own CCameraClass heading/tilt to follow HMD yaw/pitch, so its culling
+        // frustum follows the headset instead of the original monitor camera.
+        UpdateEngineCameraSteering();
+
         if (!g_originalPresent)
         {
             return E_FAIL;
@@ -875,10 +1088,19 @@ namespace
             RenegadeVR::HeadPose livePose = {};
             const bool livePoseValid = GetLiveHeadPoseForCurrentFrame(livePose);
 
+            // When engine-camera steering is enabled, yaw and pitch are already
+            // fed into Renegade's real CCameraClass through mouse deltas. Do not
+            // apply them again here or the view would rotate twice. Roll is not
+            // represented by Renegade's gameplay camera and remains a final D3D
+            // view-space adjustment.
             const float yawDegrees =
-                livePoseValid ? livePose.yawDegrees : g_debugCameraYawDegrees;
+                livePoseValid
+                    ? (g_engineCameraSteeringEnabled ? 0.0f : livePose.yawDegrees)
+                    : g_debugCameraYawDegrees;
             const float pitchDegrees =
-                livePoseValid ? livePose.pitchDegrees : g_debugCameraPitchDegrees;
+                livePoseValid
+                    ? (g_engineCameraSteeringEnabled ? 0.0f : livePose.pitchDegrees)
+                    : g_debugCameraPitchDegrees;
             const float rollDegrees =
                 livePoseValid ? livePose.rollDegrees : g_debugCameraRollDegrees;
 
@@ -910,7 +1132,9 @@ namespace
                         char message[320] = {};
                         sprintf_s(
                             message,
-                            "LIVE_HEAD_POSE applied for first time. Yaw=%.3f Pitch=%.3f Roll=%.3f PresentFrame=%ld.",
+                            "LIVE_HEAD_POSE applied for first time. SourceYaw=%.3f SourcePitch=%.3f AppliedYaw=%.3f AppliedPitch=%.3f Roll=%.3f PresentFrame=%ld.",
+                            livePose.yawDegrees,
+                            livePose.pitchDegrees,
                             yawDegrees,
                             pitchDegrees,
                             rollDegrees,
@@ -1023,6 +1247,7 @@ namespace
         void** returnedDevice)
     {
         g_gameWindow = focusWindow;
+        ResetEngineCameraSteeringPose();
         g_mouseFocusRepairComplete = false;
         g_mouseFocusRepairAttempts = 0;
         g_lastMouseFocusRepairFrame = -1;
