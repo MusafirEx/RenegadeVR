@@ -1,7 +1,0 @@
-Package: openxr-loader
-Version: 1.1.60
-Depends: jsoncpp, opengl, vcpkg-cmake, vcpkg-cmake-config
-Architecture: x64-windows
-Multi-Arch: same
-Abi: d80a29de324f2ab546db2cdff5b3defd834c7d9f9fde48620b2aefaed8dbeda3
-Description: A royalty-free, open standard that provides high-performance access to Augmented Reality (AR) and Virtual Reality (VR)—collectively known as XR—platforms and devices

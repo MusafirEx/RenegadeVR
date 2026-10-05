@@ -1,3 +1,0 @@
-C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build-xrhost/CMakeFiles/RenegadeVRXRHost.dir
-C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build-xrhost/CMakeFiles/ALL_BUILD.dir
-C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build-xrhost/CMakeFiles/ZERO_CHECK.dir
