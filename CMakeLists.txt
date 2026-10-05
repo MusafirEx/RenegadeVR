@@ -31,6 +31,7 @@ renegadevr_apply_common_settings(RenegadeVR)
 
 add_library(D3D8Proxy SHARED
     src/d3d8_proxy/D3D8Proxy.cpp
+    src/d3d8_proxy/D3D8Hooks.cpp
     src/d3d8_proxy/D3D8Exports.def
 )
 set_target_properties(D3D8Proxy PROPERTIES OUTPUT_NAME "d3d8")
