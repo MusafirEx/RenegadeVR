@@ -15,6 +15,17 @@ namespace
     constexpr std::size_t kIDirect3DDevice8_Present = 15;
     constexpr std::size_t kIDirect3DDevice8_BeginScene = 34;
     constexpr std::size_t kIDirect3DDevice8_EndScene = 35;
+    constexpr std::size_t kIDirect3DDevice8_SetTransform = 37;
+
+    // D3DTRANSFORMSTATETYPE values from the legacy Direct3D 8 API.
+    constexpr DWORD kD3DTS_View = 2;
+    constexpr DWORD kD3DTS_Projection = 3;
+    constexpr DWORD kD3DTS_World = 256;
+
+    struct LegacyD3DMatrix
+    {
+        float m[4][4];
+    };
 
     using CreateDeviceFn = HRESULT(WINAPI*)(
         void* self,
@@ -41,15 +52,25 @@ namespace
 
     using SceneFn = HRESULT(WINAPI*)(void* self);
 
+    using SetTransformFn = HRESULT(WINAPI*)(
+        void* self,
+        DWORD state,
+        const LegacyD3DMatrix* matrix
+    );
+
     CreateDeviceFn g_originalCreateDevice = nullptr;
     ResetFn g_originalReset = nullptr;
     PresentFn g_originalPresent = nullptr;
     SceneFn g_originalBeginScene = nullptr;
     SceneFn g_originalEndScene = nullptr;
+    SetTransformFn g_originalSetTransform = nullptr;
 
     volatile LONG g_presentCount = 0;
     volatile LONG g_beginSceneCount = 0;
     volatile LONG g_endSceneCount = 0;
+    volatile LONG g_viewTransformCount = 0;
+    volatile LONG g_projectionTransformCount = 0;
+    volatile LONG g_worldTransformCount = 0;
 
     template <typename T>
     bool HookVTableEntry(
@@ -116,6 +137,34 @@ namespace
         return true;
     }
 
+    void LogMatrix(const char* label, LONG count, const LegacyD3DMatrix* matrix)
+    {
+        if (!matrix)
+        {
+            char message[192] = {};
+            sprintf_s(message, "%s transform #%ld has a null matrix.", label, count);
+            RenegadeVR::D3D8ProxyLog(message);
+            return;
+        }
+
+        char message[768] = {};
+        sprintf_s(
+            message,
+            "%s transform #%ld: "
+            "[%.5f %.5f %.5f %.5f] "
+            "[%.5f %.5f %.5f %.5f] "
+            "[%.5f %.5f %.5f %.5f] "
+            "[%.5f %.5f %.5f %.5f]",
+            label,
+            count,
+            matrix->m[0][0], matrix->m[0][1], matrix->m[0][2], matrix->m[0][3],
+            matrix->m[1][0], matrix->m[1][1], matrix->m[1][2], matrix->m[1][3],
+            matrix->m[2][0], matrix->m[2][1], matrix->m[2][2], matrix->m[2][3],
+            matrix->m[3][0], matrix->m[3][1], matrix->m[3][2], matrix->m[3][3]
+        );
+        RenegadeVR::D3D8ProxyLog(message);
+    }
+
     HRESULT WINAPI HookReset(void* self, void* presentationParameters)
     {
         RenegadeVR::D3D8ProxyLog("IDirect3DDevice8::Reset intercepted.");
@@ -147,8 +196,6 @@ namespace
     {
         const LONG frame = InterlockedIncrement(&g_presentCount);
 
-        // Avoid writing to disk every frame. The first Present proves the hook
-        // works; periodic messages make it easy to confirm it remains active.
         if (frame == 1 || (frame % 300) == 0)
         {
             char message[160] = {};
@@ -208,6 +255,57 @@ namespace
         return g_originalEndScene(self);
     }
 
+    HRESULT WINAPI HookSetTransform(
+        void* self,
+        DWORD state,
+        const LegacyD3DMatrix* matrix)
+    {
+        if (state == kD3DTS_View)
+        {
+            const LONG count = InterlockedIncrement(&g_viewTransformCount);
+
+            // Capture a small initial sample, then one sample periodically.
+            if (count <= 8 || (count % 600) == 0)
+            {
+                LogMatrix("D3DTS_VIEW", count, matrix);
+            }
+        }
+        else if (state == kD3DTS_Projection)
+        {
+            const LONG count = InterlockedIncrement(&g_projectionTransformCount);
+
+            if (count <= 8 || (count % 600) == 0)
+            {
+                LogMatrix("D3DTS_PROJECTION", count, matrix);
+            }
+        }
+        else if (state >= kD3DTS_World)
+        {
+            const LONG count = InterlockedIncrement(&g_worldTransformCount);
+
+            // World transforms are extremely frequent. Count them without
+            // dumping matrices so logging does not affect gameplay.
+            if (count == 1 || (count % 5000) == 0)
+            {
+                char message[192] = {};
+                sprintf_s(
+                    message,
+                    "D3DTS_WORLD-family transform intercepted. Count=%ld State=%lu.",
+                    count,
+                    static_cast<unsigned long>(state)
+                );
+                RenegadeVR::D3D8ProxyLog(message);
+            }
+        }
+
+        if (!g_originalSetTransform)
+        {
+            return E_FAIL;
+        }
+
+        return g_originalSetTransform(self, state, matrix);
+    }
+
     bool InstallDeviceHooks(void* device)
     {
         if (!device)
@@ -250,6 +348,14 @@ namespace
             &HookEndScene,
             g_originalEndScene,
             "IDirect3DDevice8::EndScene"
+        );
+
+        success &= HookVTableEntry(
+            device,
+            kIDirect3DDevice8_SetTransform,
+            &HookSetTransform,
+            g_originalSetTransform,
+            "IDirect3DDevice8::SetTransform"
         );
 
         RenegadeVR::D3D8ProxyLog(
