@@ -1,0 +1,5 @@
+function(renegadevr_apply_common_settings target_name)
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE /W4 /permissive- /EHsc)
+    endif()
+endfunction()
