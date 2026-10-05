@@ -1,0 +1,7 @@
+{
+  "name": "renegadevr-xrhost",
+  "version-string": "0.0.1",
+  "dependencies": [
+    "openxr-loader"
+  ]
+}
