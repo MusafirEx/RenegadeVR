@@ -19,6 +19,7 @@ namespace
     HMODULE g_proxyModule = nullptr;
     HMODULE g_realD3D8 = nullptr;
     HMODULE g_vrPlugin = nullptr;
+    volatile LONG g_bootstrapLogInitialized = 0;
 
     using Direct3DCreate8Fn = IDirect3D8Opaque* (WINAPI*)(UINT);
     Direct3DCreate8Fn g_realDirect3DCreate8 = nullptr;
@@ -85,6 +86,26 @@ namespace RenegadeVR
 
         char logPath[MAX_PATH] = {};
         sprintf_s(logPath, "%s\\RenegadeVR-bootstrap.log", directory);
+
+        // Start each Renegade process with a fresh bootstrap log. This runs on
+        // the first real logging call, outside DllMain/loader lock.
+        if (InterlockedCompareExchange(&g_bootstrapLogInitialized, 1, 0) == 0)
+        {
+            HANDLE resetFile = CreateFileA(
+                logPath,
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                nullptr,
+                CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr
+            );
+
+            if (resetFile != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(resetFile);
+            }
+        }
 
         HANDLE file = CreateFileA(
             logPath,
