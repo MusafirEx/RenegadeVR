@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 
@@ -21,6 +22,10 @@ namespace
     constexpr DWORD kD3DTS_View = 2;
     constexpr DWORD kD3DTS_Projection = 3;
     constexpr DWORD kD3DTS_World = 256;
+
+    constexpr float kIdentityEpsilon = 0.0005f;
+    constexpr float kMatrixChangeEpsilon = 0.0010f;
+    constexpr LONG kCameraLogFrameInterval = 60;
 
     struct LegacyD3DMatrix
     {
@@ -71,6 +76,54 @@ namespace
     volatile LONG g_viewTransformCount = 0;
     volatile LONG g_projectionTransformCount = 0;
     volatile LONG g_worldTransformCount = 0;
+    volatile LONG g_cameraCandidateCount = 0;
+
+    LegacyD3DMatrix g_lastProjection = {};
+    LegacyD3DMatrix g_lastLoggedCameraView = {};
+    bool g_hasProjection = false;
+    bool g_hasLoggedCameraView = false;
+    LONG g_lastCameraLogFrame = -kCameraLogFrameInterval;
+
+    bool IsApproximatelyIdentity(const LegacyD3DMatrix* matrix)
+    {
+        if (!matrix)
+        {
+            return false;
+        }
+
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+            {
+                const float expected = (row == column) ? 1.0f : 0.0f;
+                if (std::fabs(matrix->m[row][column] - expected) > kIdentityEpsilon)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    bool MatricesDiffer(
+        const LegacyD3DMatrix& a,
+        const LegacyD3DMatrix& b,
+        float epsilon)
+    {
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+            {
+                if (std::fabs(a.m[row][column] - b.m[row][column]) > epsilon)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     template <typename T>
     bool HookVTableEntry(
@@ -142,7 +195,7 @@ namespace
         if (!matrix)
         {
             char message[192] = {};
-            sprintf_s(message, "%s transform #%ld has a null matrix.", label, count);
+            sprintf_s(message, "%s #%ld has a null matrix.", label, count);
             RenegadeVR::D3D8ProxyLog(message);
             return;
         }
@@ -150,7 +203,7 @@ namespace
         char message[768] = {};
         sprintf_s(
             message,
-            "%s transform #%ld: "
+            "%s #%ld: "
             "[%.5f %.5f %.5f %.5f] "
             "[%.5f %.5f %.5f %.5f] "
             "[%.5f %.5f %.5f %.5f] "
@@ -163,6 +216,43 @@ namespace
             matrix->m[3][0], matrix->m[3][1], matrix->m[3][2], matrix->m[3][3]
         );
         RenegadeVR::D3D8ProxyLog(message);
+    }
+
+    void LogCameraCandidate(
+        LONG viewTransformCount,
+        LONG candidateCount,
+        const LegacyD3DMatrix* view)
+    {
+        const LONG frame = g_presentCount;
+        const LONG scene = g_beginSceneCount;
+
+        char message[256] = {};
+        sprintf_s(
+            message,
+            "CAMERA_CANDIDATE #%ld detected at PresentFrame=%ld BeginSceneCount=%ld ViewTransform=%ld.",
+            candidateCount,
+            frame,
+            scene,
+            viewTransformCount
+        );
+        RenegadeVR::D3D8ProxyLog(message);
+
+        LogMatrix("CAMERA_VIEW", candidateCount, view);
+
+        if (g_hasProjection)
+        {
+            LogMatrix(
+                "CAMERA_ACTIVE_PROJECTION",
+                g_projectionTransformCount,
+                &g_lastProjection
+            );
+        }
+        else
+        {
+            RenegadeVR::D3D8ProxyLog(
+                "CAMERA_ACTIVE_PROJECTION unavailable: no projection captured yet."
+            );
+        }
     }
 
     HRESULT WINAPI HookReset(void* self, void* presentationParameters)
@@ -196,7 +286,7 @@ namespace
     {
         const LONG frame = InterlockedIncrement(&g_presentCount);
 
-        if (frame == 1 || (frame % 300) == 0)
+        if (frame == 1 || (frame % 600) == 0)
         {
             char message[160] = {};
             sprintf_s(message, "IDirect3DDevice8::Present intercepted. Frame=%ld.", frame);
@@ -221,7 +311,7 @@ namespace
     {
         const LONG count = InterlockedIncrement(&g_beginSceneCount);
 
-        if (count == 1 || (count % 300) == 0)
+        if (count == 1 || (count % 1200) == 0)
         {
             char message[160] = {};
             sprintf_s(message, "IDirect3DDevice8::BeginScene intercepted. Count=%ld.", count);
@@ -240,7 +330,7 @@ namespace
     {
         const LONG count = InterlockedIncrement(&g_endSceneCount);
 
-        if (count == 1 || (count % 300) == 0)
+        if (count == 1 || (count % 1200) == 0)
         {
             char message[160] = {};
             sprintf_s(message, "IDirect3DDevice8::EndScene intercepted. Count=%ld.", count);
@@ -264,28 +354,57 @@ namespace
         {
             const LONG count = InterlockedIncrement(&g_viewTransformCount);
 
-            // Capture a small initial sample, then one sample periodically.
-            if (count <= 8 || (count % 600) == 0)
+            if (matrix && !IsApproximatelyIdentity(matrix))
             {
-                LogMatrix("D3DTS_VIEW", count, matrix);
+                const LONG candidateCount = InterlockedIncrement(&g_cameraCandidateCount);
+                const LONG frame = g_presentCount;
+
+                const bool changed =
+                    !g_hasLoggedCameraView ||
+                    MatricesDiffer(
+                        *matrix,
+                        g_lastLoggedCameraView,
+                        kMatrixChangeEpsilon
+                    );
+
+                const bool enoughFramesElapsed =
+                    (frame - g_lastCameraLogFrame) >= kCameraLogFrameInterval;
+
+                if (changed && enoughFramesElapsed)
+                {
+                    LogCameraCandidate(count, candidateCount, matrix);
+                    g_lastLoggedCameraView = *matrix;
+                    g_hasLoggedCameraView = true;
+                    g_lastCameraLogFrame = frame;
+                }
+            }
+            else if (count <= 3)
+            {
+                LogMatrix("D3DTS_VIEW_INITIAL", count, matrix);
             }
         }
         else if (state == kD3DTS_Projection)
         {
             const LONG count = InterlockedIncrement(&g_projectionTransformCount);
 
-            if (count <= 8 || (count % 600) == 0)
+            if (matrix)
             {
-                LogMatrix("D3DTS_PROJECTION", count, matrix);
+                g_lastProjection = *matrix;
+                g_hasProjection = true;
+            }
+
+            // Initial samples are useful for verifying the projection hook.
+            // After that, projection is logged only alongside camera candidates.
+            if (count <= 8)
+            {
+                LogMatrix("D3DTS_PROJECTION_INITIAL", count, matrix);
             }
         }
         else if (state >= kD3DTS_World)
         {
             const LONG count = InterlockedIncrement(&g_worldTransformCount);
 
-            // World transforms are extremely frequent. Count them without
-            // dumping matrices so logging does not affect gameplay.
-            if (count == 1 || (count % 5000) == 0)
+            if (count == 1 || (count % 50000) == 0)
             {
                 char message[192] = {};
                 sprintf_s(
