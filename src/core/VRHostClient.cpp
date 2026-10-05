@@ -116,7 +116,10 @@ namespace RenegadeVR
 {
     VRHostClient::~VRHostClient()
     {
-        Shutdown();
+        // Do not wait on the host process from a DLL static destructor. Windows
+        // may run this during loader-lock teardown. Normal shutdown uses the
+        // explicit Shutdown() path; on process termination xrhost also watches
+        // the game PID and exits independently.
     }
 
     bool VRHostClient::Initialize()
