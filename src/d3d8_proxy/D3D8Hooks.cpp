@@ -27,6 +27,13 @@ namespace
     constexpr float kMatrixChangeEpsilon = 0.0010f;
     constexpr LONG kCameraLogFrameInterval = 60;
 
+    // Renegade's main world camera uses a standard perspective transform with
+    // m[2][3] ~= -1, m[3][3] ~= 0 and a short near plane. Other passes seen in
+    // the game use orthographic/utility matrices or a much larger near plane.
+    constexpr float kPerspectiveEpsilon = 0.01f;
+    constexpr float kMainCameraNearMin = 0.05f;
+    constexpr float kMainCameraNearMax = 1.00f;
+
     struct LegacyD3DMatrix
     {
         float m[4][4];
@@ -77,12 +84,47 @@ namespace
     volatile LONG g_projectionTransformCount = 0;
     volatile LONG g_worldTransformCount = 0;
     volatile LONG g_cameraCandidateCount = 0;
+    volatile LONG g_mainCameraViewCount = 0;
 
     LegacyD3DMatrix g_lastProjection = {};
     LegacyD3DMatrix g_lastLoggedCameraView = {};
     bool g_hasProjection = false;
     bool g_hasLoggedCameraView = false;
     LONG g_lastCameraLogFrame = -kCameraLogFrameInterval;
+    bool g_mainProjectionAnnounced = false;
+
+    float EstimateNearPlane(const LegacyD3DMatrix& projection)
+    {
+        // For Renegade's observed D3D8 perspective matrices:
+        // near ~= m[3][2] / m[2][2].
+        if (std::fabs(projection.m[2][2]) < 0.000001f)
+        {
+            return 0.0f;
+        }
+
+        return std::fabs(projection.m[3][2] / projection.m[2][2]);
+    }
+
+    bool IsMainPerspectiveProjection(const LegacyD3DMatrix& projection)
+    {
+        if (std::fabs(projection.m[2][3] + 1.0f) > kPerspectiveEpsilon)
+        {
+            return false;
+        }
+
+        if (std::fabs(projection.m[3][3]) > kPerspectiveEpsilon)
+        {
+            return false;
+        }
+
+        if (projection.m[0][0] <= 0.0f || projection.m[1][1] <= 0.0f)
+        {
+            return false;
+        }
+
+        const float nearPlane = EstimateNearPlane(projection);
+        return nearPlane >= kMainCameraNearMin && nearPlane <= kMainCameraNearMax;
+    }
 
     bool IsApproximatelyIdentity(const LegacyD3DMatrix* matrix)
     {
@@ -229,7 +271,7 @@ namespace
         char message[256] = {};
         sprintf_s(
             message,
-            "CAMERA_CANDIDATE #%ld detected at PresentFrame=%ld BeginSceneCount=%ld ViewTransform=%ld.",
+            "MAIN_CAMERA #%ld detected at PresentFrame=%ld BeginSceneCount=%ld ViewTransform=%ld.",
             candidateCount,
             frame,
             scene,
@@ -237,12 +279,12 @@ namespace
         );
         RenegadeVR::D3D8ProxyLog(message);
 
-        LogMatrix("CAMERA_VIEW", candidateCount, view);
+        LogMatrix("MAIN_CAMERA_VIEW", candidateCount, view);
 
         if (g_hasProjection)
         {
             LogMatrix(
-                "CAMERA_ACTIVE_PROJECTION",
+                "MAIN_CAMERA_PROJECTION",
                 g_projectionTransformCount,
                 &g_lastProjection
             );
@@ -250,7 +292,7 @@ namespace
         else
         {
             RenegadeVR::D3D8ProxyLog(
-                "CAMERA_ACTIVE_PROJECTION unavailable: no projection captured yet."
+                "MAIN_CAMERA_PROJECTION unavailable: no projection captured yet."
             );
         }
     }
@@ -354,9 +396,13 @@ namespace
         {
             const LONG count = InterlockedIncrement(&g_viewTransformCount);
 
-            if (matrix && !IsApproximatelyIdentity(matrix))
+            const bool mainProjectionActive =
+                g_hasProjection && IsMainPerspectiveProjection(g_lastProjection);
+
+            if (matrix && !IsApproximatelyIdentity(matrix) && mainProjectionActive)
             {
                 const LONG candidateCount = InterlockedIncrement(&g_cameraCandidateCount);
+                InterlockedIncrement(&g_mainCameraViewCount);
                 const LONG frame = g_presentCount;
 
                 const bool changed =
@@ -391,6 +437,21 @@ namespace
             {
                 g_lastProjection = *matrix;
                 g_hasProjection = true;
+
+                if (!g_mainProjectionAnnounced && IsMainPerspectiveProjection(*matrix))
+                {
+                    const float nearPlane = EstimateNearPlane(*matrix);
+                    char message[256] = {};
+                    sprintf_s(
+                        message,
+                        "Main perspective projection identified. NearPlane~=%.5f XScale=%.5f YScale=%.5f.",
+                        nearPlane,
+                        matrix->m[0][0],
+                        matrix->m[1][1]
+                    );
+                    RenegadeVR::D3D8ProxyLog(message);
+                    g_mainProjectionAnnounced = true;
+                }
             }
 
             // Initial samples are useful for verifying the projection hook.
