@@ -1,6 +1,53 @@
 #include "RenegadeVR/VRCore.h"
 
+#include <windows.h>
+
+#include <cstdio>
+#include <cstring>
+
 #include "RenegadeVR/Logger.h"
+
+namespace
+{
+    bool GetCoreIniPath(char* output, DWORD outputSize)
+    {
+        if (!output || outputSize == 0)
+        {
+            return false;
+        }
+
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExA(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCSTR>(&GetCoreIniPath),
+                &module))
+        {
+            return false;
+        }
+
+        const DWORD length = GetModuleFileNameA(module, output, outputSize);
+        if (length == 0 || length >= outputSize)
+        {
+            return false;
+        }
+
+        char* slash = std::strrchr(output, '\\');
+        if (!slash)
+        {
+            slash = std::strrchr(output, '/');
+        }
+
+        if (!slash)
+        {
+            return false;
+        }
+
+        *(slash + 1) = '\0';
+        sprintf_s(output, outputSize, "%sRenegadeVR.ini", output);
+        return true;
+    }
+}
 
 namespace RenegadeVR
 {
@@ -12,9 +59,39 @@ namespace RenegadeVR
         }
 
         headPose_ = {};
+
+        char iniPath[MAX_PATH] = {};
+        if (GetCoreIniPath(iniPath, MAX_PATH))
+        {
+            vrEnabled_ =
+                GetPrivateProfileIntA("VR", "Enabled", 0, iniPath) != 0;
+            headTrackingEnabled_ =
+                GetPrivateProfileIntA("VR", "HeadTracking", 0, iniPath) != 0;
+            useXRHost_ =
+                GetPrivateProfileIntA("VR", "UseXRHost", 1, iniPath) != 0;
+        }
+        else
+        {
+            Log("VRCore: unable to resolve RenegadeVR.ini path.");
+        }
+
         initialized_ = true;
 
-        Log("VRCore::Initialize - head pose interface ready; OpenXR provider not connected yet.");
+        char message[256] = {};
+        sprintf_s(
+            message,
+            "VRCore::Initialize - VR=%s HeadTracking=%s XRHost=%s.",
+            vrEnabled_ ? "on" : "off",
+            headTrackingEnabled_ ? "on" : "off",
+            useXRHost_ ? "on" : "off"
+        );
+        Log(message);
+
+        if (vrEnabled_ && headTrackingEnabled_ && useXRHost_)
+        {
+            hostClient_.Initialize();
+        }
+
         return true;
     }
 
@@ -24,6 +101,8 @@ namespace RenegadeVR
         {
             return;
         }
+
+        hostClient_.Shutdown();
 
         headPose_ = {};
         initialized_ = false;
@@ -37,10 +116,14 @@ namespace RenegadeVR
             return;
         }
 
-        // Future milestone:
-        // poll OpenXR here and populate headPose_. Until then orientationValid
-        // remains FALSE, so the D3D8 camera hook continues to use debug INI
-        // rotation as its fallback test source.
+        headPose_ = {};
+
+        if (!vrEnabled_ || !headTrackingEnabled_ || !useXRHost_)
+        {
+            return;
+        }
+
+        hostClient_.Update(headPose_);
     }
 
     bool VRCore::GetHeadPose(HeadPose& pose) const
