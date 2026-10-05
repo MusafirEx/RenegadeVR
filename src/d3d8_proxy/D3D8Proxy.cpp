@@ -3,11 +3,12 @@
 #include <cstdio>
 #include <cstring>
 
+#include "RenegadeVR/D3D8Hooks.h"
 #include "RenegadeVR/D3D8Proxy.h"
 
 // The bootstrap proxy intentionally does not include <d3d8.h>.
 // Modern Windows SDKs no longer ship the legacy Direct3D 8 headers, and for
-// this first milestone we only need to forward the Direct3DCreate8 ABI.
+// these early milestones we only need the COM ABI and selected vtable slots.
 //
 // Direct3DCreate8 returns an IDirect3D8* COM interface pointer. Treating that
 // pointer as void* is ABI-compatible for transparent forwarding on x86.
@@ -50,7 +51,22 @@ namespace
         return true;
     }
 
-    void BootstrapLog(const char* message)
+    void LogLastError(const char* operation)
+    {
+        char message[512] = {};
+        sprintf_s(
+            message,
+            "%s failed. GetLastError=%lu",
+            operation ? operation : "Operation",
+            static_cast<unsigned long>(GetLastError())
+        );
+        RenegadeVR::D3D8ProxyLog(message);
+    }
+}
+
+namespace RenegadeVR
+{
+    void D3D8ProxyLog(const char* message)
     {
         if (!message)
         {
@@ -114,21 +130,6 @@ namespace
         CloseHandle(file);
     }
 
-    void LogLastError(const char* operation)
-    {
-        char message[512] = {};
-        sprintf_s(
-            message,
-            "%s failed. GetLastError=%lu",
-            operation ? operation : "Operation",
-            static_cast<unsigned long>(GetLastError())
-        );
-        BootstrapLog(message);
-    }
-}
-
-namespace RenegadeVR
-{
     HMODULE LoadRealD3D8()
     {
         if (g_realD3D8)
@@ -147,7 +148,7 @@ namespace RenegadeVR
         char d3d8Path[MAX_PATH] = {};
         sprintf_s(d3d8Path, "%s\\d3d8.dll", systemDirectory);
 
-        BootstrapLog("Loading system Direct3D 8 runtime.");
+        D3D8ProxyLog("Loading system Direct3D 8 runtime.");
 
         g_realD3D8 = LoadLibraryA(d3d8Path);
         if (!g_realD3D8)
@@ -166,7 +167,7 @@ namespace RenegadeVR
             return nullptr;
         }
 
-        BootstrapLog("System Direct3D 8 runtime loaded.");
+        D3D8ProxyLog("System Direct3D 8 runtime loaded.");
         return g_realD3D8;
     }
 
@@ -180,14 +181,14 @@ namespace RenegadeVR
         char directory[MAX_PATH] = {};
         if (!GetProxyDirectory(directory, MAX_PATH))
         {
-            BootstrapLog("Unable to resolve RenegadeVR proxy directory.");
+            D3D8ProxyLog("Unable to resolve RenegadeVR proxy directory.");
             return false;
         }
 
         char pluginPath[MAX_PATH] = {};
         sprintf_s(pluginPath, "%s\\RenegadeVR.dll", directory);
 
-        BootstrapLog("Loading RenegadeVR.dll.");
+        D3D8ProxyLog("Loading RenegadeVR.dll.");
 
         g_vrPlugin = LoadLibraryA(pluginPath);
         if (!g_vrPlugin)
@@ -196,7 +197,7 @@ namespace RenegadeVR
             return false;
         }
 
-        BootstrapLog("RenegadeVR.dll loaded.");
+        D3D8ProxyLog("RenegadeVR.dll loaded.");
         return true;
     }
 }
@@ -204,7 +205,7 @@ namespace RenegadeVR
 extern "C" __declspec(dllexport)
 IDirect3D8Opaque* WINAPI Direct3DCreate8(UINT sdkVersion)
 {
-    BootstrapLog("Direct3DCreate8 intercepted.");
+    RenegadeVR::D3D8ProxyLog("Direct3DCreate8 intercepted.");
 
     // The VR plugin is optional during bootstrap testing. A failure to load it
     // must not prevent Renegade from falling through to the real D3D8 runtime.
@@ -212,19 +213,27 @@ IDirect3D8Opaque* WINAPI Direct3DCreate8(UINT sdkVersion)
 
     if (!RenegadeVR::LoadRealD3D8() || !g_realDirect3DCreate8)
     {
-        BootstrapLog("Direct3DCreate8 forwarding unavailable.");
+        RenegadeVR::D3D8ProxyLog("Direct3DCreate8 forwarding unavailable.");
         return nullptr;
     }
 
     IDirect3D8Opaque* d3d8 = g_realDirect3DCreate8(sdkVersion);
 
-    if (d3d8)
+    if (!d3d8)
     {
-        BootstrapLog("Direct3DCreate8 forwarded successfully.");
+        RenegadeVR::D3D8ProxyLog("Real Direct3DCreate8 returned nullptr.");
+        return nullptr;
     }
-    else
+
+    RenegadeVR::D3D8ProxyLog("Direct3DCreate8 forwarded successfully.");
+
+    if (!RenegadeVR::InstallD3D8Hooks(d3d8))
     {
-        BootstrapLog("Real Direct3DCreate8 returned nullptr.");
+        // Hook failure is non-fatal at this stage. Preserve the original game
+        // behavior so debugging can continue without blocking Direct3D.
+        RenegadeVR::D3D8ProxyLog(
+            "Warning: failed to install IDirect3D8 hook; continuing unmodified."
+        );
     }
 
     return d3d8;
