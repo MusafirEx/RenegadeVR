@@ -45,3 +45,10 @@ add_custom_command(TARGET RenegadeVR POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/config/RenegadeVR.ini
         $<TARGET_FILE_DIR:RenegadeVR>/RenegadeVR.ini
 )
+
+
+add_custom_command(TARGET D3D8Proxy POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/config/RenegadeVR.ini
+        $<TARGET_FILE_DIR:D3D8Proxy>/RenegadeVR.ini
+)
