@@ -31,8 +31,6 @@ target_include_directories(RenegadeVRXRHost PRIVATE
 target_compile_definitions(RenegadeVRXRHost PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
-    XR_USE_PLATFORM_WIN32
-    XR_USE_GRAPHICS_API_D3D11
 )
 
 target_link_libraries(RenegadeVRXRHost PRIVATE
