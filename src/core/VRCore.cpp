@@ -44,7 +44,7 @@ namespace
         }
 
         *(slash + 1) = '\0';
-        sprintf_s(output, outputSize, "%sRenegadeVR.ini", output);
+        strcat_s(output, outputSize, "RenegadeVR.ini");
         return true;
     }
 }
