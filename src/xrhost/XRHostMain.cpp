@@ -3,6 +3,7 @@
 #include <dxgi1_2.h>
 
 #include <algorithm>
+#include <cstdarg>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -381,15 +382,19 @@ namespace
             return XR_ERROR_GRAPHICS_DEVICE_INVALID;
         }
 
-        D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+        const D3D_FEATURE_LEVEL requestedLevels[] =
+        {
+            requirements.minFeatureLevel
+        };
+        D3D_FEATURE_LEVEL featureLevel = requirements.minFeatureLevel;
 
         const HRESULT deviceResult = D3D11CreateDevice(
             xr.adapter,
             D3D_DRIVER_TYPE_UNKNOWN,
             nullptr,
             0,
-            nullptr,
-            0,
+            requestedLevels,
+            1,
             D3D11_SDK_VERSION,
             &xr.device,
             &featureLevel,
