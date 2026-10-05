@@ -21,6 +21,7 @@ add_library(RenegadeVR SHARED
     src/core/RenegadeVRExports.def
     src/core/Logger.cpp
     src/core/VRCore.cpp
+    src/core/VRHostClient.cpp
     src/core/VRCamera.cpp
     src/core/VRInput.cpp
     src/core/VRWeapon.cpp
