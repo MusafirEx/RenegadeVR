@@ -96,9 +96,11 @@ namespace
     LONG g_lastCameraLogFrame = -kCameraLogFrameInterval;
     bool g_mainProjectionAnnounced = false;
 
-    bool g_debugCameraYawEnabled = false;
+    bool g_debugCameraRotationEnabled = false;
     float g_debugCameraYawDegrees = 0.0f;
-    volatile LONG g_debugCameraYawApplyCount = 0;
+    float g_debugCameraPitchDegrees = 0.0f;
+    float g_debugCameraRollDegrees = 0.0f;
+    volatile LONG g_debugCameraRotationApplyCount = 0;
 
     bool GetProxyIniPath(char* output, DWORD outputSize)
     {
@@ -151,32 +153,76 @@ namespace
             return;
         }
 
-        g_debugCameraYawEnabled =
-            GetPrivateProfileIntA(
-                "Debug",
-                "EnableCameraYawTest",
-                0,
-                iniPath
-            ) != 0;
+        // Prefer the new 3-axis switch. If it is absent, keep compatibility
+        // with older RenegadeVR.ini files that used EnableCameraYawTest.
+        char rotationEnabledText[32] = {};
+        GetPrivateProfileStringA(
+            "Debug",
+            "EnableCameraRotationTest",
+            "",
+            rotationEnabledText,
+            static_cast<DWORD>(sizeof(rotationEnabledText)),
+            iniPath
+        );
+
+        if (rotationEnabledText[0] != '\0')
+        {
+            g_debugCameraRotationEnabled = std::atoi(rotationEnabledText) != 0;
+        }
+        else
+        {
+            g_debugCameraRotationEnabled =
+                GetPrivateProfileIntA(
+                    "Debug",
+                    "EnableCameraYawTest",
+                    0,
+                    iniPath
+                ) != 0;
+        }
 
         char yawText[64] = {};
+        char pitchText[64] = {};
+        char rollText[64] = {};
+
         GetPrivateProfileStringA(
             "Debug",
             "CameraYawDegrees",
-            "5.0",
+            "0.0",
             yawText,
             static_cast<DWORD>(sizeof(yawText)),
             iniPath
         );
 
-        g_debugCameraYawDegrees = static_cast<float>(std::atof(yawText));
+        GetPrivateProfileStringA(
+            "Debug",
+            "CameraPitchDegrees",
+            "0.0",
+            pitchText,
+            static_cast<DWORD>(sizeof(pitchText)),
+            iniPath
+        );
 
-        char message[256] = {};
+        GetPrivateProfileStringA(
+            "Debug",
+            "CameraRollDegrees",
+            "0.0",
+            rollText,
+            static_cast<DWORD>(sizeof(rollText)),
+            iniPath
+        );
+
+        g_debugCameraYawDegrees = static_cast<float>(std::atof(yawText));
+        g_debugCameraPitchDegrees = static_cast<float>(std::atof(pitchText));
+        g_debugCameraRollDegrees = static_cast<float>(std::atof(rollText));
+
+        char message[320] = {};
         sprintf_s(
             message,
-            "Debug camera yaw test: %s, Degrees=%.3f.",
-            g_debugCameraYawEnabled ? "enabled" : "disabled",
-            g_debugCameraYawDegrees
+            "Debug camera rotation test: %s, Yaw=%.3f Pitch=%.3f Roll=%.3f.",
+            g_debugCameraRotationEnabled ? "enabled" : "disabled",
+            g_debugCameraYawDegrees,
+            g_debugCameraPitchDegrees,
+            g_debugCameraRollDegrees
         );
         RenegadeVR::D3D8ProxyLog(message);
     }
@@ -205,26 +251,52 @@ namespace
         return result;
     }
 
-    LegacyD3DMatrix ApplyCameraSpaceYaw(
+    LegacyD3DMatrix ApplyCameraSpaceRotation(
         const LegacyD3DMatrix& view,
-        float yawDegrees)
+        float yawDegrees,
+        float pitchDegrees,
+        float rollDegrees)
     {
-        const float radians = yawDegrees * (kPi / 180.0f);
-        const float c = std::cos(radians);
-        const float s = std::sin(radians);
+        const float yawRadians = yawDegrees * (kPi / 180.0f);
+        const float pitchRadians = pitchDegrees * (kPi / 180.0f);
+        const float rollRadians = rollDegrees * (kPi / 180.0f);
 
-        // D3D fixed-function matrices use row-vector convention. Post-
-        // multiplying the view transform applies a rotation in camera space,
-        // which is exactly what an HMD orientation offset will eventually do.
+        const float cy = std::cos(yawRadians);
+        const float sy = std::sin(yawRadians);
+        const float cp = std::cos(pitchRadians);
+        const float sp = std::sin(pitchRadians);
+        const float cr = std::cos(rollRadians);
+        const float sr = std::sin(rollRadians);
+
+        // D3D fixed-function transforms use row-vector convention.
         LegacyD3DMatrix yaw = {};
-        yaw.m[0][0] = c;
-        yaw.m[0][2] = -s;
+        yaw.m[0][0] = cy;
+        yaw.m[0][2] = -sy;
         yaw.m[1][1] = 1.0f;
-        yaw.m[2][0] = s;
-        yaw.m[2][2] = c;
+        yaw.m[2][0] = sy;
+        yaw.m[2][2] = cy;
         yaw.m[3][3] = 1.0f;
 
-        return MultiplyMatrices(view, yaw);
+        LegacyD3DMatrix pitch = {};
+        pitch.m[0][0] = 1.0f;
+        pitch.m[1][1] = cp;
+        pitch.m[1][2] = sp;
+        pitch.m[2][1] = -sp;
+        pitch.m[2][2] = cp;
+        pitch.m[3][3] = 1.0f;
+
+        LegacyD3DMatrix roll = {};
+        roll.m[0][0] = cr;
+        roll.m[0][1] = sr;
+        roll.m[1][0] = -sr;
+        roll.m[1][1] = cr;
+        roll.m[2][2] = 1.0f;
+        roll.m[3][3] = 1.0f;
+
+        LegacyD3DMatrix rotated = MultiplyMatrices(view, yaw);
+        rotated = MultiplyMatrices(rotated, pitch);
+        rotated = MultiplyMatrices(rotated, roll);
+        return rotated;
     }
 
     float EstimateNearPlane(const LegacyD3DMatrix& projection)
@@ -617,33 +689,45 @@ namespace
             return E_FAIL;
         }
 
+        const bool debugRotationNonZero =
+            std::fabs(g_debugCameraYawDegrees) > 0.0001f ||
+            std::fabs(g_debugCameraPitchDegrees) > 0.0001f ||
+            std::fabs(g_debugCameraRollDegrees) > 0.0001f;
+
         if (
             state == kD3DTS_View &&
             matrix &&
-            g_debugCameraYawEnabled &&
+            g_debugCameraRotationEnabled &&
             g_hasProjection &&
             IsMainPerspectiveProjection(g_lastProjection) &&
             !IsApproximatelyIdentity(matrix) &&
-            std::fabs(g_debugCameraYawDegrees) > 0.0001f)
+            debugRotationNonZero)
         {
             LegacyD3DMatrix modifiedView =
-                ApplyCameraSpaceYaw(*matrix, g_debugCameraYawDegrees);
+                ApplyCameraSpaceRotation(
+                    *matrix,
+                    g_debugCameraYawDegrees,
+                    g_debugCameraPitchDegrees,
+                    g_debugCameraRollDegrees
+                );
 
             const LONG applyCount =
-                InterlockedIncrement(&g_debugCameraYawApplyCount);
+                InterlockedIncrement(&g_debugCameraRotationApplyCount);
 
             if (applyCount == 1)
             {
-                char message[256] = {};
+                char message[320] = {};
                 sprintf_s(
                     message,
-                    "DEBUG_CAMERA_YAW applied for first time. Degrees=%.3f PresentFrame=%ld.",
+                    "DEBUG_CAMERA_ROTATION applied for first time. Yaw=%.3f Pitch=%.3f Roll=%.3f PresentFrame=%ld.",
                     g_debugCameraYawDegrees,
+                    g_debugCameraPitchDegrees,
+                    g_debugCameraRollDegrees,
                     g_presentCount
                 );
                 RenegadeVR::D3D8ProxyLog(message);
-                LogMatrix("DEBUG_CAMERA_YAW_ORIGINAL_VIEW", applyCount, matrix);
-                LogMatrix("DEBUG_CAMERA_YAW_MODIFIED_VIEW", applyCount, &modifiedView);
+                LogMatrix("DEBUG_CAMERA_ROTATION_ORIGINAL_VIEW", applyCount, matrix);
+                LogMatrix("DEBUG_CAMERA_ROTATION_MODIFIED_VIEW", applyCount, &modifiedView);
             }
 
             return g_originalSetTransform(self, state, &modifiedView);
