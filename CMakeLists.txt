@@ -18,6 +18,7 @@ include(cmake/RenegadeVRCommon.cmake)
 
 add_library(RenegadeVR SHARED
     src/core/RenegadeVR.cpp
+    src/core/RenegadeVRExports.def
     src/core/Logger.cpp
     src/core/VRCore.cpp
     src/core/VRCamera.cpp
