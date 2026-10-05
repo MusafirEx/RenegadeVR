@@ -156,7 +156,8 @@ RenegadeVR.ini
 not `RenegadeVR(1).ini`, `RenegadeVR(2).ini`, or another renamed copy.
 
 Current default configuration enables hosted head tracking while leaving stereo
-rendering and controllers disabled:
+rendering and controllers disabled. It also enables the experimental engine-camera
+steering path used to fix Renegade's original camera-frustum culling:
 
 ```ini
 [VR]
@@ -166,6 +167,7 @@ UseXRHost=1
 StereoRendering=0
 HeadTracking=1
 MotionControllers=0
+EngineCameraSteering=1
 
 [Debug]
 EnableCameraRotationTest=0
@@ -175,7 +177,39 @@ CameraRollDegrees=0.0
 
 [Input]
 AutoRestoreMouseFocus=1
+EngineMouseScale=0.0025
+EngineSteeringYawSign=1.0
+EngineSteeringPitchSign=-1.0
 ```
+
+### VR culling fix
+
+Renegade performs scene visibility collection before the final Direct3D view
+transform is submitted. Applying HMD rotation only in `D3DTS_VIEW` therefore
+lets the headset look outside the engine's original camera frustum, producing
+missing or partially rendered buildings, rocks, and environment.
+
+With `EngineCameraSteering=1`, RenegadeVR feeds frame-to-frame HMD yaw and pitch
+movement back into Renegade as relative mouse input. The game's own
+`CCameraClass` then rotates before its physics/visibility pass, so
+`PhysicsSceneClass::Pre_Render_Processing` collects geometry for the direction
+the headset is actually facing.
+
+Yaw and pitch are therefore **not applied a second time** in the final D3D view.
+Roll remains a D3D view-space transform because the original gameplay camera has
+no roll control.
+
+`EngineMouseScale=0.0025` matches Renegade's default
+`MouseSensitivity=0.5`. The original game calculates:
+
+```text
+MouseScale = 25 * 10^(2 * MouseSensitivity - 5)
+```
+
+If the engine camera rotates too much or too little compared with the headset,
+set `EngineMouseScale` to the value corresponding to your Renegade mouse
+sensitivity. `EngineSteeringYawSign` and `EngineSteeringPitchSign` are
+available only for axis-direction correction during testing.
 
 ## Meta Quest 3 / Quest 3S setup
 
@@ -260,13 +294,18 @@ This milestone is **tracking-only**, not full stereo VR yet.
 Expected behavior:
 
 ```text
-Move head left/right  -> camera yaw
-Move head up/down     -> camera pitch
-Tilt head             -> camera roll
+Move head left/right  -> Renegade engine camera yaw follows HMD
+Move head up/down     -> Renegade engine camera pitch follows HMD
+Tilt head             -> final D3D camera roll follows HMD
 
 Mouse                 -> Renegade's normal camera input remains available
-HMD                    -> additional tracked head orientation
+Engine frustum/PVS    -> follows the steered Renegade camera yaw/pitch
 ```
+
+This culling fix intentionally makes HMD yaw/pitch affect Renegade's gameplay
+camera and aiming for the current tracking-only milestone. Independent head
+orientation and controller-driven weapon aiming are later milestones and will
+require a higher-level camera/weapon split.
 
 The first valid HMD pose is captured as the neutral orientation so the camera
 does not jump to an absolute OpenXR pose when tracking begins.
