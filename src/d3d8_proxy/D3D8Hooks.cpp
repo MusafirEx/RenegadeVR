@@ -103,9 +103,147 @@ namespace
     volatile LONG g_debugCameraRotationApplyCount = 0;
     volatile LONG g_liveHeadPoseApplyCount = 0;
 
+    HWND g_gameWindow = nullptr;
+    bool g_autoRestoreMouseFocus = true;
+    bool g_mouseFocusRepairComplete = false;
+    LONG g_mouseFocusRepairAttempts = 0;
+    LONG g_lastMouseFocusRepairFrame = -1;
+    constexpr LONG kMaxMouseFocusRepairAttempts = 120;
+
     RenegadeVR::HeadPose g_cachedHeadPose = {};
     LONG g_cachedHeadPoseFrame = -1;
     bool g_cachedHeadPoseValid = false;
+
+    bool IsWindowOrChildFocused(HWND root, HWND focused)
+    {
+        if (!root || !focused)
+        {
+            return false;
+        }
+
+        return focused == root || IsChild(root, focused) != FALSE;
+    }
+
+    void TryRestoreGameplayMouseFocus()
+    {
+        if (
+            !g_autoRestoreMouseFocus ||
+            g_mouseFocusRepairComplete ||
+            !g_gameWindow ||
+            !IsWindow(g_gameWindow) ||
+            g_mouseFocusRepairAttempts >= kMaxMouseFocusRepairAttempts)
+        {
+            return;
+        }
+
+        const LONG frame = g_presentCount;
+        if (frame == g_lastMouseFocusRepairFrame)
+        {
+            return;
+        }
+
+        g_lastMouseFocusRepairFrame = frame;
+        ++g_mouseFocusRepairAttempts;
+
+        HWND foregroundBefore = GetForegroundWindow();
+        HWND focusBefore = GetFocus();
+
+        const bool alreadyForeground = foregroundBefore == g_gameWindow;
+        const bool alreadyFocused =
+            IsWindowOrChildFocused(g_gameWindow, focusBefore);
+
+        if (!alreadyForeground || !alreadyFocused)
+        {
+            const DWORD currentThread = GetCurrentThreadId();
+            const DWORD gameThread =
+                GetWindowThreadProcessId(g_gameWindow, nullptr);
+            const DWORD foregroundThread =
+                foregroundBefore
+                    ? GetWindowThreadProcessId(foregroundBefore, nullptr)
+                    : 0;
+
+            bool attachedGameThread = false;
+            bool attachedForegroundThread = false;
+
+            if (gameThread != 0 && gameThread != currentThread)
+            {
+                attachedGameThread =
+                    AttachThreadInput(currentThread, gameThread, TRUE) != FALSE;
+            }
+
+            if (
+                foregroundThread != 0 &&
+                foregroundThread != currentThread &&
+                foregroundThread != gameThread)
+            {
+                attachedForegroundThread =
+                    AttachThreadInput(
+                        currentThread,
+                        foregroundThread,
+                        TRUE
+                    ) != FALSE;
+            }
+
+            if (IsIconic(g_gameWindow))
+            {
+                ShowWindow(g_gameWindow, SW_RESTORE);
+            }
+
+            BringWindowToTop(g_gameWindow);
+            SetForegroundWindow(g_gameWindow);
+            SetActiveWindow(g_gameWindow);
+            SetFocus(g_gameWindow);
+
+            if (attachedForegroundThread)
+            {
+                AttachThreadInput(currentThread, foregroundThread, FALSE);
+            }
+
+            if (attachedGameThread)
+            {
+                AttachThreadInput(currentThread, gameThread, FALSE);
+            }
+        }
+
+        HWND foregroundAfter = GetForegroundWindow();
+        HWND focusAfter = GetFocus();
+
+        const bool foregroundRestored =
+            foregroundAfter == g_gameWindow;
+        const bool focusRestored =
+            IsWindowOrChildFocused(g_gameWindow, focusAfter);
+
+        if (foregroundRestored && focusRestored)
+        {
+            g_mouseFocusRepairComplete = true;
+
+            char message[320] = {};
+            sprintf_s(
+                message,
+                "Gameplay mouse focus restored. Attempt=%ld Frame=%ld Window=%p.",
+                g_mouseFocusRepairAttempts,
+                frame,
+                g_gameWindow
+            );
+            RenegadeVR::D3D8ProxyLog(message);
+        }
+        else if (
+            g_mouseFocusRepairAttempts == 1 ||
+            (g_mouseFocusRepairAttempts % 30) == 0)
+        {
+            char message[384] = {};
+            sprintf_s(
+                message,
+                "Gameplay mouse focus repair pending. Attempt=%ld Frame=%ld GameWindow=%p Foreground=%p Focus=%p.",
+                g_mouseFocusRepairAttempts,
+                frame,
+                g_gameWindow,
+                foregroundAfter,
+                focusAfter
+            );
+            RenegadeVR::D3D8ProxyLog(message);
+        }
+    }
 
     bool GetLiveHeadPoseForCurrentFrame(RenegadeVR::HeadPose& pose)
     {
@@ -236,6 +374,14 @@ namespace
         g_debugCameraPitchDegrees = static_cast<float>(std::atof(pitchText));
         g_debugCameraRollDegrees = static_cast<float>(std::atof(rollText));
 
+        g_autoRestoreMouseFocus =
+            GetPrivateProfileIntA(
+                "Input",
+                "AutoRestoreMouseFocus",
+                1,
+                iniPath
+            ) != 0;
+
         char message[320] = {};
         sprintf_s(
             message,
@@ -244,6 +390,13 @@ namespace
             g_debugCameraYawDegrees,
             g_debugCameraPitchDegrees,
             g_debugCameraRollDegrees
+        );
+        RenegadeVR::D3D8ProxyLog(message);
+
+        sprintf_s(
+            message,
+            "Gameplay mouse focus auto-restore: %s.",
+            g_autoRestoreMouseFocus ? "enabled" : "disabled"
         );
         RenegadeVR::D3D8ProxyLog(message);
     }
@@ -628,6 +781,8 @@ namespace
 
             if (matrix && !IsApproximatelyIdentity(matrix) && mainProjectionActive)
             {
+                TryRestoreGameplayMouseFocus();
+
                 const LONG candidateCount = InterlockedIncrement(&g_cameraCandidateCount);
                 InterlockedIncrement(&g_mainCameraViewCount);
                 const LONG frame = g_presentCount;
@@ -867,6 +1022,11 @@ namespace
         void* presentationParameters,
         void** returnedDevice)
     {
+        g_gameWindow = focusWindow;
+        g_mouseFocusRepairComplete = false;
+        g_mouseFocusRepairAttempts = 0;
+        g_lastMouseFocusRepairFrame = -1;
+
         char message[256] = {};
         sprintf_s(
             message,
