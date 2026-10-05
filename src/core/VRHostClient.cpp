@@ -405,12 +405,14 @@ namespace RenegadeVR
             return false;
         }
 
-        if (snapshot.hostFrameIndex == 0 ||
-            snapshot.hostFrameIndex == lastFrameIndex_)
+        if (snapshot.hostFrameIndex == 0)
         {
             return false;
         }
 
+        // The game may render faster than the headset refresh rate. Reuse the
+        // most recent valid pose between OpenXR frames instead of dropping back
+        // to an untracked camera for those extra game frames.
         lastFrameIndex_ = snapshot.hostFrameIndex;
 
         float currentX = snapshot.headPose.quatX;
