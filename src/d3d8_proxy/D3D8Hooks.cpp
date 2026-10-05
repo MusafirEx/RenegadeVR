@@ -101,6 +101,27 @@ namespace
     float g_debugCameraPitchDegrees = 0.0f;
     float g_debugCameraRollDegrees = 0.0f;
     volatile LONG g_debugCameraRotationApplyCount = 0;
+    volatile LONG g_liveHeadPoseApplyCount = 0;
+
+    RenegadeVR::HeadPose g_cachedHeadPose = {};
+    LONG g_cachedHeadPoseFrame = -1;
+    bool g_cachedHeadPoseValid = false;
+
+    bool GetLiveHeadPoseForCurrentFrame(RenegadeVR::HeadPose& pose)
+    {
+        const LONG frame = g_presentCount;
+
+        if (g_cachedHeadPoseFrame != frame)
+        {
+            g_cachedHeadPose = {};
+            g_cachedHeadPoseValid =
+                RenegadeVR::TryGetVRHeadPose(g_cachedHeadPose);
+            g_cachedHeadPoseFrame = frame;
+        }
+
+        pose = g_cachedHeadPose;
+        return g_cachedHeadPoseValid;
+    }
 
     bool GetProxyIniPath(char* output, DWORD outputSize)
     {
@@ -689,48 +710,86 @@ namespace
             return E_FAIL;
         }
 
-        const bool debugRotationNonZero =
-            std::fabs(g_debugCameraYawDegrees) > 0.0001f ||
-            std::fabs(g_debugCameraPitchDegrees) > 0.0001f ||
-            std::fabs(g_debugCameraRollDegrees) > 0.0001f;
-
         if (
             state == kD3DTS_View &&
             matrix &&
-            g_debugCameraRotationEnabled &&
             g_hasProjection &&
             IsMainPerspectiveProjection(g_lastProjection) &&
-            !IsApproximatelyIdentity(matrix) &&
-            debugRotationNonZero)
+            !IsApproximatelyIdentity(matrix))
         {
-            LegacyD3DMatrix modifiedView =
-                ApplyCameraSpaceRotation(
-                    *matrix,
-                    g_debugCameraYawDegrees,
-                    g_debugCameraPitchDegrees,
-                    g_debugCameraRollDegrees
-                );
+            RenegadeVR::HeadPose livePose = {};
+            const bool livePoseValid = GetLiveHeadPoseForCurrentFrame(livePose);
 
-            const LONG applyCount =
-                InterlockedIncrement(&g_debugCameraRotationApplyCount);
+            const float yawDegrees =
+                livePoseValid ? livePose.yawDegrees : g_debugCameraYawDegrees;
+            const float pitchDegrees =
+                livePoseValid ? livePose.pitchDegrees : g_debugCameraPitchDegrees;
+            const float rollDegrees =
+                livePoseValid ? livePose.rollDegrees : g_debugCameraRollDegrees;
 
-            if (applyCount == 1)
+            const bool rotationEnabled =
+                livePoseValid || g_debugCameraRotationEnabled;
+
+            const bool rotationNonZero =
+                std::fabs(yawDegrees) > 0.0001f ||
+                std::fabs(pitchDegrees) > 0.0001f ||
+                std::fabs(rollDegrees) > 0.0001f;
+
+            if (rotationEnabled && rotationNonZero)
             {
-                char message[320] = {};
-                sprintf_s(
-                    message,
-                    "DEBUG_CAMERA_ROTATION applied for first time. Yaw=%.3f Pitch=%.3f Roll=%.3f PresentFrame=%ld.",
-                    g_debugCameraYawDegrees,
-                    g_debugCameraPitchDegrees,
-                    g_debugCameraRollDegrees,
-                    g_presentCount
-                );
-                RenegadeVR::D3D8ProxyLog(message);
-                LogMatrix("DEBUG_CAMERA_ROTATION_ORIGINAL_VIEW", applyCount, matrix);
-                LogMatrix("DEBUG_CAMERA_ROTATION_MODIFIED_VIEW", applyCount, &modifiedView);
-            }
+                LegacyD3DMatrix modifiedView =
+                    ApplyCameraSpaceRotation(
+                        *matrix,
+                        yawDegrees,
+                        pitchDegrees,
+                        rollDegrees
+                    );
 
-            return g_originalSetTransform(self, state, &modifiedView);
+                if (livePoseValid)
+                {
+                    const LONG applyCount =
+                        InterlockedIncrement(&g_liveHeadPoseApplyCount);
+
+                    if (applyCount == 1)
+                    {
+                        char message[320] = {};
+                        sprintf_s(
+                            message,
+                            "LIVE_HEAD_POSE applied for first time. Yaw=%.3f Pitch=%.3f Roll=%.3f PresentFrame=%ld.",
+                            yawDegrees,
+                            pitchDegrees,
+                            rollDegrees,
+                            g_presentCount
+                        );
+                        RenegadeVR::D3D8ProxyLog(message);
+                        LogMatrix("LIVE_HEAD_POSE_ORIGINAL_VIEW", applyCount, matrix);
+                        LogMatrix("LIVE_HEAD_POSE_MODIFIED_VIEW", applyCount, &modifiedView);
+                    }
+                }
+                else
+                {
+                    const LONG applyCount =
+                        InterlockedIncrement(&g_debugCameraRotationApplyCount);
+
+                    if (applyCount == 1)
+                    {
+                        char message[320] = {};
+                        sprintf_s(
+                            message,
+                            "DEBUG_CAMERA_ROTATION applied for first time. Yaw=%.3f Pitch=%.3f Roll=%.3f PresentFrame=%ld.",
+                            yawDegrees,
+                            pitchDegrees,
+                            rollDegrees,
+                            g_presentCount
+                        );
+                        RenegadeVR::D3D8ProxyLog(message);
+                        LogMatrix("DEBUG_CAMERA_ROTATION_ORIGINAL_VIEW", applyCount, matrix);
+                        LogMatrix("DEBUG_CAMERA_ROTATION_MODIFIED_VIEW", applyCount, &modifiedView);
+                    }
+                }
+
+                return g_originalSetTransform(self, state, &modifiedView);
+            }
         }
 
         return g_originalSetTransform(self, state, matrix);
