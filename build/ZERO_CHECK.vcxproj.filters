@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\build\CMakeFiles\6bfd695f1fb72602c3a2793fd73ce585\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{276ABC73-4DE8-3D4E-858F-F09C4E9C46AC}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

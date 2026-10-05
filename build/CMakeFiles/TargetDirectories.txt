@@ -1,0 +1,4 @@
+C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build/CMakeFiles/RenegadeVR.dir
+C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build/CMakeFiles/D3D8Proxy.dir
+C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/Wasim Wahab/Documents/GitHub/RenegadeVR/build/CMakeFiles/ZERO_CHECK.dir

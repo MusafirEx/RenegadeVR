@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\RenegadeVR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\Logger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\VRCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\VRHostClient.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\VRCamera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\VRInput.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\VRWeapon.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\VRHands.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\Users\Wasim Wahab\Documents\GitHub\RenegadeVR\src\core\RenegadeVRExports.def">
+      <Filter>Source Files</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{9B4F27F8-07EC-3453-A70F-5A3ECCC6211B}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,46 @@
+Fetching registry information from https://github.com/microsoft/vcpkg (HEAD)...
+Detecting compiler hash for triplet x64-windows...
+Compiler found: C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe
+The following packages will be built and installed:
+  * egl-registry:x64-windows@2025-05-27 -- git+https://github.com/microsoft/vcpkg@980ed62fded868a1cb66460b32704aca030af013
+  * jsoncpp:x64-windows@1.9.6 -- git+https://github.com/microsoft/vcpkg@dde49ad9d554fd5f062c0c1deea6e54b6fdb35b2
+  * opengl:x64-windows@2022-12-04#3 -- git+https://github.com/microsoft/vcpkg@c3ae71738f88449ebcd781cef60d9a253fa091d4
+  * opengl-registry:x64-windows@2026-01-26 -- git+https://github.com/microsoft/vcpkg@0cd17c3b57221250d5ba174580f0a2993853ce34
+    openxr-loader:x64-windows@1.1.60 -- git+https://github.com/microsoft/vcpkg@44a3c253e7b096341042a6ca11955e3bcddf4fb6
+  * vcpkg-cmake:x64-windows@2024-04-23 -- git+https://github.com/microsoft/vcpkg@e74aa1e8f93278a8e71372f1fa08c3df420eb840
+  * vcpkg-cmake-config:x64-windows@2026-07-21 -- git+https://github.com/microsoft/vcpkg@51befcb03097f8d19c1c59f9ec3625e69d85322a
+Additional packages (*) will be modified to complete this operation.
+Restored 7 package(s) from C:\Users\Wasim Wahab\AppData\Local\vcpkg\archives in 1 s. Use --debug to see more details.
+Installing 1/7 vcpkg-cmake-config:x64-windows@2026-07-21...
+Elapsed time to handle vcpkg-cmake-config:x64-windows: 18 ms
+vcpkg-cmake-config:x64-windows package ABI: c808b44857ecca88215ae748ed49dfbcb40c7f543602501fad0b51fb30023300
+Installing 2/7 vcpkg-cmake:x64-windows@2024-04-23...
+Elapsed time to handle vcpkg-cmake:x64-windows: 222 ms
+vcpkg-cmake:x64-windows package ABI: 7d4bbbb0050c8e3d955532970158b4db83fbdf17a44e49f5fda28ea42c889c38
+Installing 3/7 egl-registry:x64-windows@2025-05-27...
+Elapsed time to handle egl-registry:x64-windows: 44.2 ms
+egl-registry:x64-windows package ABI: 1b61c9e632d58f519ad50892c97eef60b04910a5619236e18a3f729131e85bc2
+Installing 4/7 opengl-registry:x64-windows@2026-01-26...
+Elapsed time to handle opengl-registry:x64-windows: 84.7 ms
+opengl-registry:x64-windows package ABI: ba7b8b41363e4213ab2b91f32a2405169b33d78c32ebfa740d382ec8e3b6f86c
+Installing 5/7 opengl:x64-windows@2022-12-04#3...
+Elapsed time to handle opengl:x64-windows: 64.2 ms
+opengl:x64-windows package ABI: 43a7ceac48f6ec7b386428a5117019d8dd193cf146a4a84a1bce147a9267f7d4
+Installing 6/7 jsoncpp:x64-windows@1.9.6...
+Elapsed time to handle jsoncpp:x64-windows: 102 ms
+jsoncpp:x64-windows package ABI: 0b218eece5f3864fc40b0c24392517e22af7a230321e77efe6f96824f2756905
+Installing 7/7 openxr-loader:x64-windows@1.1.60...
+Elapsed time to handle openxr-loader:x64-windows: 67.2 ms
+openxr-loader:x64-windows package ABI: d80a29de324f2ab546db2cdff5b3defd834c7d9f9fde48620b2aefaed8dbeda3
+Installed contents are licensed to you by owners. Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
+Some packages did not declare an SPDX license. Check the `copyright` file for each package for more information about their licensing.
+Packages installed in this vcpkg installation declare the following licenses:
+Apache-2.0
+MIT
+openxr-loader provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(OpenXR CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE OpenXR::headers OpenXR::openxr_loader)
+
+All requested installations completed successfully in: 620 ms
